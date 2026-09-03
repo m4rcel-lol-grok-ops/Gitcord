@@ -39,6 +39,13 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  logger.error("Fatal startup error", err);
-  process.exit(1);
+  logger.error("==================================================================");
+  logger.error("FATAL STARTUP ERROR OCCURRED", err);
+  logger.error("Pausing container to prevent continuous Docker restart loop.");
+  logger.error("Please inspect the error above, update your .env or configuration,");
+  logger.error("and run 'docker compose restart' to apply changes.");
+  logger.error("==================================================================");
+
+  // Keep event loop alive so error is captured in docker logs and avoids instant restart loop
+  setInterval(() => {}, 60000);
 });

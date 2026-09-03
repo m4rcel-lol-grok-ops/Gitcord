@@ -23,9 +23,8 @@ export function sanitizeLogData(input: string): string {
   return input
     .replace(/(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}/g, "[REDACTED_GITHUB_TOKEN]")
     .replace(/glpat-[A-Za-z0-9_-]{20,}/g, "[REDACTED_GITLAB_TOKEN]")
-    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [REDACTED_BEARER_TOKEN]")
-    .replace(/token\s+[A-Za-z0-9._-]+/gi, "token [REDACTED_TOKEN]")
-    .replace(/(?:password|secret|token|authorization)\s*[:=]\s*['"][^'"]+['"]/gi, "$1=[REDACTED]");
+    .replace(/Bearer\s+[A-Za-z0-9._-]{15,}/gi, "Bearer [REDACTED_BEARER_TOKEN]")
+    .replace(/(?:password|secret|token|authorization)\s*[:=]\s*['"]?[^\s'"]+['"]?/gi, "token=[REDACTED]");
 }
 
 export class Logger {
