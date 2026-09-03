@@ -16,22 +16,27 @@ import { NotificationDispatcher } from "./dispatcher";
 import { logger } from "../utils/logger";
 
 export class GitcordBot {
-  readonly client: Client;
+  client: Client;
   readonly trackingService: TrackingService;
   readonly commandHandlers: CommandHandlers;
   readonly slashHandler: SlashCommandHandler;
   readonly prefixHandler: PrefixCommandHandler;
-  readonly dispatcher: NotificationDispatcher;
+  dispatcher: NotificationDispatcher;
+  private isShuttingDown = false;
 
-  constructor() {
+  constructor(includeMessageContent = true) {
     const repository = getRepository();
 
+    const intents = [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMessages,
+    ];
+    if (includeMessageContent) {
+      intents.push(GatewayIntentBits.MessageContent);
+    }
+
     this.client = new Client({
-      intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-      ],
+      intents,
       partials: [Partials.Channel, Partials.Message],
       allowedMentions: { parse: [] }, // Strict security: prevent unintended pings
     });
@@ -101,16 +106,74 @@ export class GitcordBot {
   }
 
   async start(): Promise<void> {
-    if (!config.discordToken) {
-      logger.error("DISCORD_TOKEN is not configured in environment. Bot cannot connect.");
+    if (!config.discordToken || config.discordToken.trim() === "") {
+      logger.error("==================================================================");
+      logger.error("DISCORD_TOKEN is missing or empty in .env!");
+      logger.error("Please configure a valid DISCORD_TOKEN in your .env file.");
+      logger.error("Pausing container to prevent continuous restart loops.");
+      logger.error("After updating .env, run: docker compose restart");
+      logger.error("==================================================================");
+
+      // Keep process alive so Docker Compose doesn't loop restart
+      await new Promise((resolve) => setInterval(resolve, 60000));
       return;
     }
 
     logger.info("Connecting Gitcord to Discord gateway...");
-    await this.client.login(config.discordToken);
+
+    try {
+      await this.client.login(config.discordToken);
+    } catch (err: unknown) {
+      const errMsg = (err as Error)?.message || "";
+
+      // Check for DisallowedIntents (Message Content intent disabled in portal)
+      if (
+        errMsg.includes("DisallowedIntents") ||
+        errMsg.includes("Privileged intent") ||
+        errMsg.includes("disallowed intent")
+      ) {
+        logger.warn("==================================================================");
+        logger.warn("Discord rejected login: Message Content intent is disabled in Developer Portal.");
+        logger.warn("Retrying login without MessageContent intent...");
+        logger.warn("Slash commands (/git ...) will remain fully operational.");
+        logger.warn("To enable prefix commands (git ...), toggle 'Message Content Intent' in Discord Developer Portal -> Bot.");
+        logger.warn("==================================================================");
+
+        // Destroy previous client and recreate without MessageContent intent
+        this.client.destroy();
+        const fallbackClient = new Client({
+          intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
+          partials: [Partials.Channel, Partials.Message],
+          allowedMentions: { parse: [] },
+        });
+
+        this.client = fallbackClient;
+        this.dispatcher = new NotificationDispatcher(this.client);
+        this.setupEvents();
+
+        await this.client.login(config.discordToken);
+        return;
+      }
+
+      if (errMsg.includes("TokenInvalid") || errMsg.includes("invalid token")) {
+        logger.error("==================================================================");
+        logger.error("The provided DISCORD_TOKEN is invalid.");
+        logger.error("Please verify your token in the Discord Developer Portal.");
+        logger.error("Pausing container to prevent continuous restart loops.");
+        logger.error("After updating .env, run: docker compose restart");
+        logger.error("==================================================================");
+
+        await new Promise((resolve) => setInterval(resolve, 60000));
+        return;
+      }
+
+      throw err;
+    }
   }
 
   async stop(): Promise<void> {
+    if (this.isShuttingDown) return;
+    this.isShuttingDown = true;
     logger.info("Gracefully shutting down Gitcord...");
     this.trackingService.stop();
     this.client.destroy();
