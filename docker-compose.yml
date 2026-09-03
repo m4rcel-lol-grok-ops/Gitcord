@@ -1,0 +1,12 @@
+services:
+  gitcord:
+    build: .
+    container_name: gitcord
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - gitcord-data:/app/data
+
+volumes:
+  gitcord-data:
